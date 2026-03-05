@@ -207,12 +207,44 @@ const HTML = `<!DOCTYPE html>
     .s-sv { background: var(--sv-bg); color: var(--sv-fg); }
     .s-er { background: var(--er-bg); color: var(--er-fg); }
 
-    .result-url {
+    .result-url-wrap {
       flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: .25rem;
+      min-width: 0;
+    }
+    .result-url {
       font-family: 'Menlo', 'Monaco', monospace;
       font-size: .82rem;
       word-break: break-all;
       color: var(--text);
+    }
+    .result-dns {
+      display: flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .73rem;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+    .dns-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: .1rem .38rem;
+      border-radius: 4px;
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      flex-shrink: 0;
+    }
+    .dns-a    { background: #dbeafe; color: #1d4ed8; }
+    .dns-cname{ background: #fce7f3; color: #be185d; }
+    .dns-none { background: #f1f5f9; color: #94a3b8; }
+    .dns-val  {
+      font-family: 'Menlo', 'Monaco', monospace;
+      font-size: .73rem;
+      word-break: break-all;
     }
     .result-desc {
       font-size: .78rem;
@@ -429,9 +461,27 @@ const HTML = `<!DOCTYPE html>
       var badge = r.status ? String(r.status) : 'ERR';
       var desc  = r.error ? r.error : (r.statusText || statusLabel(r.status) || '');
       var time  = r.responseTime ? r.responseTime + ' ms' : '';
+
+      var dnsHtml = '';
+      if (r.dns && r.dns.type) {
+        var dnsCls = r.dns.type === 'A' ? 'dns-a' : 'dns-cname';
+        dnsHtml = '<div class="result-dns">' +
+          '<span class="dns-badge ' + dnsCls + '">' + r.dns.type + '</span>' +
+          '<span class="dns-val">' + esc(r.dns.value) + '</span>' +
+          '</div>';
+      } else if (r.dns === null) {
+        dnsHtml = '<div class="result-dns">' +
+          '<span class="dns-badge dns-none">DNS</span>' +
+          '<span class="dns-val">—</span>' +
+          '</div>';
+      }
+
       return '<div class="result-item">' +
         '<span class="status-badge ' + cls + '">' + badge + '</span>' +
-        '<span class="result-url">'  + esc(r.url)  + '</span>' +
+        '<div class="result-url-wrap">' +
+          '<span class="result-url">' + esc(r.url) + '</span>' +
+          dnsHtml +
+        '</div>' +
         '<span class="result-desc">' + esc(desc)   + '</span>' +
         '<span class="result-time">' + esc(time)   + '</span>' +
         '</div>';
@@ -490,9 +540,24 @@ async function handleCheck(request) {
 
 /* ── Check a single URL ──────────────────────────── */
 async function checkURL(url) {
+  let hostname;
+  try { hostname = new URL(url).hostname; } catch {
+    return { url, status: null, error: 'Invalid URL', responseTime: 0, dns: null };
+  }
+
+  // Run HTTP check and DNS lookup in parallel
+  const [httpResult, dns] = await Promise.all([
+    doHTTPCheck(url),
+    lookupDNS(hostname),
+  ]);
+
+  return { ...httpResult, dns };
+}
+
+/* ── HTTP check (HEAD → GET fallback) ───────────── */
+async function doHTTPCheck(url) {
   const startTime = Date.now();
 
-  // Try HEAD first; fall back to GET on network error or 405
   for (const method of ['HEAD', 'GET']) {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 10_000);
@@ -506,7 +571,6 @@ async function checkURL(url) {
       });
       clearTimeout(tid);
 
-      // If HEAD returns 405, retry with GET
       if (method === 'HEAD' && response.status === 405) continue;
 
       return {
@@ -522,7 +586,6 @@ async function checkURL(url) {
         return { url, status: null, error: 'Request timed out (10 s)', responseTime: Date.now() - startTime };
       }
 
-      // HEAD failed with a network error — try GET
       if (method === 'HEAD') continue;
 
       return {
@@ -533,6 +596,39 @@ async function checkURL(url) {
       };
     }
   }
+}
+
+/* ── DNS lookup via Cloudflare DoH ──────────────── */
+async function lookupDNS(hostname) {
+  const base    = 'https://cloudflare-dns.com/dns-query';
+  const headers = { Accept: 'application/dns-json' };
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 5_000);
+
+  try {
+    // 1. Check CNAME first
+    const r1  = await fetch(base + '?name=' + encodeURIComponent(hostname) + '&type=CNAME',
+                            { headers, signal: controller.signal });
+    const d1  = await r1.json();
+    const rec = (d1.Answer || []).find(r => r.type === 5);
+    if (rec) {
+      clearTimeout(tid);
+      return { type: 'CNAME', value: rec.data.replace(/\.$/, '') };
+    }
+
+    // 2. Fallback to A record
+    const r2  = await fetch(base + '?name=' + encodeURIComponent(hostname) + '&type=A',
+                            { headers, signal: controller.signal });
+    const d2  = await r2.json();
+    const ips = (d2.Answer || []).filter(r => r.type === 1).map(r => r.data);
+    if (ips.length > 0) {
+      clearTimeout(tid);
+      return { type: 'A', value: ips.join(', ') };
+    }
+  } catch { /* timeout or network error */ }
+
+  clearTimeout(tid);
+  return null;
 }
 
 /* ── Utility ─────────────────────────────────────── */
