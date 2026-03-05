@@ -38,17 +38,6 @@ const HTML = `<!DOCTYPE html>
     /* ── Header ─────────────────────────────────── */
     header { text-align: center; margin-bottom: 2.25rem; }
 
-    .logo-wrap {
-      width: 52px; height: 52px;
-      background: var(--accent);
-      border-radius: 14px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 1rem;
-      box-shadow: 0 4px 14px rgba(99,102,241,.35);
-    }
-
     header h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -.5px; }
     header p  { color: var(--muted); margin-top: .4rem; font-size: .95rem; }
 
@@ -293,15 +282,6 @@ const HTML = `<!DOCTYPE html>
 <div class="container">
 
   <header>
-    <div class="logo-wrap">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
-           stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="2" y1="12" x2="22" y2="12"/>
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10
-                 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-      </svg>
-    </div>
     <h1>HTTP Status Checker</h1>
     <p>Check the HTTP Status Code of websites from a list of URLs</p>
   </header>
